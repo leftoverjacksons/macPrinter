@@ -1,0 +1,23 @@
+[project]
+name = "macprinter"
+version = "0.1.0"
+description = "Kiosk that labels USB Ethernet dongles with their MAC address"
+requires-python = ">=3.11"
+dependencies = [
+    "segno>=1.6",
+    "reportlab>=4.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pymupdf>=1.24", "opencv-python-headless>=4.9"]
+
+[project.scripts]
+macprinter = "macprinter.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["macprinter"]

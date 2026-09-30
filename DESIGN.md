@@ -203,6 +203,12 @@ plug-ins of the same unit, and a few different units.
 (`/sys/bus/usb/devices/*/serial`) if present and unique per unit — cheap
 dongles often have none or a shared constant value. Probe output will show.
 
+**Update (2026-09-30):** the same dongle was checked on several Windows PCs.
+The MAC was identical on all but one, so the dongle **does** carry a programmed
+MAC; the outlier PC was overriding it on the host side (cause 2). Blocker
+downgraded. Still to do later: check a batch of units for duplicate MACs, and
+confirm `addr_assign_type` = 0 on the Pi with `tools/mac_probe.sh`.
+
 ### 4.3 Network isolation
 The kiosk must not attempt DHCP or route through the dongles under test.
 - Mark USB NICs unmanaged in NetworkManager (match by driver or by
@@ -488,6 +494,8 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
    end and re-feed that sheet — check for jams/lifting.
 2. **M1 – Detection CLI:** prints MAC + validation to terminal on plug-in.
 3. **M2 – Sheet renderer:** template YAML → PDF; alignment test page; calibrate.
+   *Status: renderer + alignment page implemented and tested (QR decodes at
+   600 dpi); calibration on the MF3010 pending.*
 4. **M3 – State + allocation:** SQLite, sessions, cell allocation, commit
    semantics, unit tests.
 5. **M4 – Kiosk UI:** full workflow on touchscreen.
@@ -511,7 +519,7 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 9 | Export/integration target? | | **closed:** Google Sheet (service account, outbox) |
 | 10 | Display: touchscreen size, or monitor + keyboard? | | open |
 | 11 | One operator station, or multiple kiosks sharing state? | | open |
-| 13 | AX88179 MAC is not stable across plug-ins: root cause (blank EEPROM vs host override) and remedy A/B/C/D (§4.2b) | | **open — blocker** |
+| 13 | AX88179 MAC is not stable across plug-ins | | **mostly closed:** stable on all PCs but one (host override). Duplicate check across units deferred |
 | 12 | Does silver polyester survive the MF3010 fuser, and does a partially used sheet re-feed without jamming? | | open — M0 test |
 
 ---
@@ -529,3 +537,5 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 2026-09-30 | Google Sheet sync via service account + local outbox | Offline-tolerant; SQLite stays source of truth |
 | 2026-09-30 | Observed unstable MAC on AX88179 re-plug; added diagnosis + remedy options | Test result from user |
 | 2026-09-30 | Unstable MAC was observed on Windows; final product host is a Raspberry Pi (Linux) | User input; makes remedy D viable, adds systemd pitfall |
+| 2026-09-30 | MAC confirmed stable on all but one PC; proceed, duplicate check deferred | User test |
+| 2026-09-30 | Renderer: QR modules drawn on the 600 dpi dot grid after calibration offset; text auto-sized to fit (≤ 9 pt Courier-Bold) | Keeps every module exactly 10 dots; prevents text overflow |
