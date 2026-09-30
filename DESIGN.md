@@ -1,6 +1,7 @@
 # macPrinter — Design Document
 
-Status: **Draft / planning** — no code yet. This document records requirements,
+Status: **Draft / planning** — no code yet. Hardware fixed: ASIX AX88179 dongles,
+OnlineLabels OL25SP sheets, Canon imageCLASS MF3010 (USB). This document records requirements,
 decisions, risks, and open questions. Update it whenever a decision is made or
 changed; record the change in the Decision Log at the bottom.
 
@@ -106,9 +107,25 @@ labels** if not detected:
 | Dongle enumerates first as mass-storage "driver CD" (some RTL8153 units) | No `net` event appears | `usb_modeswitch` rule, or document as unsupported model |
 | Multicast / locally-administered bit set | Check bits in first octet | Warn |
 
+**Our dongle:** ASIX **AX88179** (USB 3.0 → Gigabit). Linux driver
+`ax88179_178a` (in mainline kernel; no install needed). USB VID:PID normally
+`0b95:1790`. The driver reads the MAC from the dongle's EEPROM; if the EEPROM
+is blank/invalid it falls back to a random address, which `addr_assign_type`
+will reveal.
+
 **Assumption to verify with real hardware:** our specific dongle model reports
 a stable, permanent, unique MAC. Test: plug the same dongle in 5× across two
 reboots; MAC must be identical and `addr_assign_type` must be 0.
+
+### 4.2a Reading a MAC by hand (for M0 testing)
+| OS | Command |
+|----|---------|
+| Linux / Pi | `ip -br link` (USB NIC usually `eth1` or `enx<mac>`); or `cat /sys/class/net/*/address`; permanent vs random: `cat /sys/class/net/<iface>/addr_assign_type` (0 = burned-in) |
+| Windows | `getmac /v` or `ipconfig /all` ("Physical Address", shown with dashes) |
+| macOS | `networksetup -listallhardwareports` |
+
+Note: on Linux, predictable interface naming may name the interface
+`enx9c69d39c1265` — the MAC itself — which is a handy sanity check.
 
 ### 4.3 Network isolation
 The kiosk must not attempt DHCP or route through the dongles under test.
@@ -124,17 +141,36 @@ queued after unplug — the operator may unplug each dongle as they go.
 
 ## 5. Label content
 
-- **QR payload:** MAC in uppercase with colons, e.g. `AA:BB:CC:DD:EE:FF`
-  (17 chars). Uppercase hex and `:` fall within QR *alphanumeric* mode, so this
-  fits in a **Version 1 (21×21) QR at ECC level M**. Keep the payload exactly
-  the MAC (no prefix/URL) unless a downstream scanner workflow needs otherwise.
-  *(Open question: colon vs. no-colon vs. dash format.)*
-- **Human-readable text:** same MAC, monospace font, next to the QR code.
-  Optional second line (product name / date) — TBD.
-- **Sizing guidance:** QR module size ≥ 0.4 mm for reliable phone/handheld
-  scanning on reflective media → 21 modules + 4-module quiet zone each side
-  ≈ 29 modules ≈ **11.6 mm** square minimum. Final size depends on the label
-  stock dimensions.
+**Decided format:** `9C-69-D3-9C-12-65` — uppercase hex, dash-separated,
+17 characters. Identical string in the QR code and in the printed text. No
+other text on the label.
+
+- **QR payload:** exactly the string above, no prefix, no newline. Uppercase
+  hex and `-` are in the QR *alphanumeric* character set, so it fits a
+  **Version 1 (21×21 modules) QR at ECC level M** (capacity 20 alphanumeric
+  characters). Encoder must be forced to alphanumeric mode and uppercase —
+  lowercase would force byte mode and a larger symbol.
+- **Human-readable text:** same string, bold monospace, right of the QR code.
+
+### 5.1 Layout on an OL25 label (1.75" × 0.5" = 44.45 × 12.70 mm)
+Printer is 600 dpi, so module size is chosen as an integer number of dots
+to avoid uneven modules:
+
+| Element | Value |
+|---------|-------|
+| QR module | 10 dots = 0.423 mm |
+| QR symbol | 21 modules = 8.89 mm square |
+| QR quiet zone | 1.9 mm top/bottom (≈4.5 modules — meets the 4-module spec) |
+| QR left edge | 1.9 mm from label left edge |
+| Text region | x ≈ 12.7 mm → 42.9 mm (≈30 mm wide), vertically centred |
+| Text size | ≈ 8 pt Courier-Bold / DejaVu Sans Mono Bold (17 chars × 0.6 em ≈ 29 mm) |
+
+8 pt is readable but small. Alternative if needed: two lines
+(`9C-69-D3` / `9C-12-65`) at ≈ 11 pt. Default is one line, per requirement.
+
+**Safe zone:** OL25 rows are butt-cut (zero vertical gap, see §6.1), so keep
+all ink ≥ 1.5 mm from the top and bottom label edges; vertical misregistration
+otherwise prints onto the neighbouring label.
 - **Metallized media caveat:** glossy/metallic surfaces can cause specular
   glare that defeats some scanners. Validate scanning with the actual scanners
   used downstream (phone camera, handheld imager) early.
@@ -151,17 +187,23 @@ same content model feeds both the sheet PDF renderer and a future ZPL renderer.
 ## 6. Sheet model & state tracking
 
 ### 6.1 Sheet template (configuration, YAML)
-Physical geometry, in millimetres, measured from the top-left of the page as it
-enters the printer:
+Geometry of **OnlineLabels OL25SP** (weatherproof silver polyester, laser),
+measured from the vendor template PDF (`OL25.pdf`, 612 × 792 pt page). Units
+are inches in the source; the template file stores inches to avoid rounding:
 ```yaml
-id: metpoly-40x20-a4          # example only; real stock TBD
-page: { width: 210, height: 297 }
-label: { width: 40, height: 20, corner_radius: 1.5 }
-grid: { cols: 4, rows: 13 }
-origin: { left: 10, top: 12 }       # top-left of first label
-pitch: { x: 48, y: 21.2 }           # centre-to-centre spacing
-fill_order: row-major               # or column-major
+id: OL25SP
+vendor: OnlineLabels
+material: weatherproof silver polyester (laser)
+page:   { width: 8.5,  height: 11.0 }        # US Letter
+label:  { width: 1.75, height: 0.5, corner_radius: 0.047 }
+grid:   { cols: 4, rows: 20 }                # 80 labels / sheet
+origin: { left: 0.33, top: 0.5 }             # top-left of label (row 0, col 0)
+pitch:  { x: 2.03125, y: 0.5 }               # col gap 0.28125", row gap 0
+fill_order: row-major                        # see §7 on fill order
 ```
+Derived from the PDF: column x-origins 23.76 / 170.01 / 316.26 / 462.51 pt;
+rows start at 36 pt and step 36 pt (0.5") through 720 pt. **Rows have no
+vertical gap** — adjacent labels share an edge.
 Plus a **per-printer calibration offset** (`dx`, `dy`, optional scale) set via a
 printed alignment test page, because lasers commonly shift output by 0.5–2 mm.
 
@@ -215,8 +257,15 @@ through laser printers:
 - Remaining labels can lift/peel along the curved paper path at fuser
   temperatures.
 
+**Printer-specific note:** the Canon imageCLASS MF3010 appears to feed only
+from its 150-sheet front cassette (curved "C" path; no straight-through
+bypass found in the specs). It lists "Label" as a supported media type.
+This makes re-feeding a partially used sheet **riskier** than on a printer
+with a straight path. Select media type = Label (lower speed / fuser setting).
+
 Mitigations to evaluate before committing to the sheet-reuse workflow:
-1. Use a printer with a **straight-through / manual bypass** feed path.
+1. Use a printer with a **straight-through / manual bypass** feed path
+   (not available on the MF3010).
 2. Check the chosen label stock's datasheet for re-feed guidance and max
    fuser temperature (metallized polyester must be rated for laser use).
 3. Remove labels only from the **trailing** end of the sheet (fill order such
@@ -269,7 +318,17 @@ Placement { content: LabelContent, cell: (row, col) | None }
 ```
 - `SheetPdfCupsBackend` (Phase 1): renders a single-page PDF per sheet with
   labels at absolute positions; sends to CUPS with `-o fit-to-page=false`
-  / scaling 100%, selecting the manual/bypass tray and "labels" media type.
+  / scaling 100%,
+  selecting the "Label" media type.
+
+**MF3010 driver on the Pi:** the MF3010 is not IPP-Everywhere / driverless; it
+needs Canon's proprietary **UFR II / UFRII LT** CUPS driver
+(`cnrdrvcups-lb`, v5.x+). That package ships PPDs `CNRCUPSMF3010ZK.ppd` /
+`CNRCUPSMF3010ZS.ppd`, and Canon publishes ARM builds of v5.x+ — but
+**MF3010 operation on a Raspberry Pi (arm64) is unverified**. This is an M0
+blocker to test first. Fallbacks if it fails: (a) a different printer with
+PostScript/PCL or driverless IPP support (lowest risk), (b) print via a
+small x86 host, (c) jump directly to the Phase 2 roll printer.
 - `ZplRollBackend` (Phase 2): sends each label as ZPL immediately; no sheet
   state; session workflow may collapse to "print on detect".
 
@@ -282,8 +341,24 @@ print path shifts every label. Verify with the alignment page.
 
 - Every labeled MAC is stored permanently with timestamps, job id, and sheet
   position. Provides an inventory of shipped dongle MACs.
-- CSV export from the UI; optionally, later, push to an external system
-  (ERP / spreadsheet) — TBD.
+- CSV export from the UI.
+- **Google Sheets sync (decided):** append one row per printed label to a
+  Google Sheet we own.
+  - Auth: a Google Cloud **service account**; the sheet is shared with the
+    service-account e-mail (Editor). Key JSON stored on the Pi with `0600`
+    permissions, outside the repo, never committed.
+  - Library: `gspread` (Sheets API v4, `values.append`).
+  - **Outbox pattern:** rows are written to a local `sync_outbox` table in the
+    same transaction as the print job; a background worker pushes them and
+    marks them synced. Network outages never block printing; rows are retried
+    until acknowledged. SQLite remains the source of truth.
+  - Idempotency: each row carries a unique `event_id`; the worker checks for
+    it before appending after a retry, so a crash mid-append does not
+    duplicate rows.
+  - Proposed columns: `timestamp_utc, mac, event (printed|reprinted|voided),
+    sheet_id, row, col, print_job_id, kiosk_id, usb_vid_pid, event_id`.
+  - The sheet is write-only from the kiosk's view (it never reads back for
+    decisions); duplicate detection uses the local DB.
 - Daily SQLite backup to USB stick or network share — TBD.
 
 ---
@@ -329,8 +404,12 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 
 ## 13. Milestones
 
-1. **M0 – Hardware validation:** confirm dongle MAC stability/uniqueness on a Pi;
-   obtain label stock datasheet; confirm printer can feed the stock.
+1. **M0 – Hardware validation:** (a) AX88179 MAC stable across 5 re-plugs and
+   2 reboots, `addr_assign_type`=0, no duplicates across ~10 units;
+   (b) install `cnrdrvcups-lb` on the Pi and print a test page on the MF3010;
+   (c) print one full OL25SP sheet — check toner adhesion/fusing on silver
+   polyester and QR scan reliability; (d) peel a few labels from the trailing
+   end and re-feed that sheet — check for jams/lifting.
 2. **M1 – Detection CLI:** prints MAC + validation to terminal on plug-in.
 3. **M2 – Sheet renderer:** template YAML → PDF; alignment test page; calibrate.
 4. **M3 – State + allocation:** SQLite, sessions, cell allocation, commit
@@ -345,17 +424,18 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 
 | # | Question | Owner | Status |
 |---|----------|-------|--------|
-| 1 | Exact dongle model(s)? (chipset: RTL8152/8153, AX88179, …) | | open |
-| 2 | Label stock: manufacturer/part no., sheet size (Letter/A4), label size, grid, laser rating | | open |
-| 3 | Printer make/model; manual feed / straight path available? Network or USB? | | open |
-| 4 | MAC format on label & in QR: `AA:BB:…`, `AABB…`, `AA-BB-…`? Upper/lower case? | | open |
-| 5 | Additional label text (company, product, logo, date)? | | open |
+| 1 | Exact dongle model(s)? | | **closed:** ASIX AX88179 |
+| 2 | Label stock? | | **closed:** OnlineLabels OL25SP, 80/sheet, Letter |
+| 3 | Printer? | | **closed:** Canon imageCLASS MF3010, USB. Pi driver support = M0 test |
+| 4 | MAC format? | | **closed:** `9C-69-D3-9C-12-65` |
+| 5 | Additional label text? | | **closed:** none |
 | 6 | Who/what scans the QR downstream, and with what device? | | open |
-| 7 | Should a MAC that was already labeled be re-printable (reprint for lost label)? | | open |
-| 8 | Link/function test of the dongle as part of the flow? | | open |
-| 9 | Export/integration target for the MAC list (CSV, Google Sheet, ERP)? | | open |
+| 7 | Reprint a MAC that was already labeled? | | **closed:** yes, low priority (warn + confirm) |
+| 8 | Link test (cable into dongle, verify carrier + speed) as part of the flow? | | open — awaiting decision |
+| 9 | Export/integration target? | | **closed:** Google Sheet (service account, outbox) |
 | 10 | Display: touchscreen size, or monitor + keyboard? | | open |
 | 11 | One operator station, or multiple kiosks sharing state? | | open |
+| 12 | Does silver polyester survive the MF3010 fuser, and does a partially used sheet re-feed without jamming? | | open — M0 test |
 
 ---
 
@@ -366,3 +446,7 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 2026-09-30 | Initial draft created; Phase 1 = laser + sheets, Phase 2 = thermal roll | Per project kickoff |
 | 2026-09-30 | Printer backends abstracted behind a common interface | Allow roll printer without rewrite |
 | 2026-09-30 | Cells marked `used` at print time, not at confirmation | Prefer wasting a label over double-printing a cell |
+| 2026-09-30 | Hardware: AX88179 dongles, OL25SP sheets (4×20), MF3010 via USB | User input |
+| 2026-09-30 | Label = `9C-69-D3-9C-12-65` text + QR of same string, nothing else | User input |
+| 2026-09-30 | QR: V1-M alphanumeric, 10-dot (0.423 mm) modules at 600 dpi | Fits 0.5" label height with full quiet zone |
+| 2026-09-30 | Google Sheet sync via service account + local outbox | Offline-tolerant; SQLite stays source of truth |
