@@ -41,6 +41,7 @@ function showTab(name) {
 function render() {
   if (!S) return;
   renderChips();
+  $("sim-banner").hidden = S.detector !== "sim";
   $("detector-error").hidden = !S.detector_error;
   $("detector-error").textContent = `Detector error: ${S.detector_error}`;
   if (tab === "session") renderSession();

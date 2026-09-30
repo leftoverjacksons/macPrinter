@@ -35,7 +35,9 @@ h2 { font-size: 15px; margin: 8px 0; text-transform: uppercase; letter-spacing: 
 .btn:disabled { opacity: .45; cursor: default; }
 input[type=text], input[type=number], input:not([type]) { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .banner { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; }
-.banner.info { background: var(--run-bg); } .banner.warn { background: var(--warn-bg); } .banner.error { background: var(--fail-bg); color: var(--fail); margin: 12px 16px 0; }
+.banner.info { background: var(--run-bg); }
+.banner.top { margin: 12px 16px 0; }
+code { font-family: var(--mono); background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; } .banner.warn { background: var(--warn-bg); } .banner.error { background: var(--fail-bg); color: var(--fail); margin: 12px 16px 0; }
 .inline { display: inline-flex; gap: 6px; align-items: center; }
 
 /* detections */
