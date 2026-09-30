@@ -1,51 +1,82 @@
 # macPrinter
 
-Raspberry Pi kiosk that reads the MAC address of a USB-Ethernet dongle and
-prints a QR + text label onto partially used label sheets. See
-[DESIGN.md](DESIGN.md) for requirements, decisions, and open questions.
+Kiosk that reads the MAC address of a USB-Ethernet dongle, checks the dongle works
+(Ethernet link + internet through it), and lays out QR + text labels onto partially
+used label sheets. See [DESIGN.md](DESIGN.md) for requirements, decisions, and open questions.
 
-**Status:** label/sheet rendering and the alignment page work (milestone M2).
-Detection service, sheet state, kiosk UI, and printing are not built yet.
+**Status:** dashboard, simulated dongles, checks, sheet tracking, and PDF preview work.
+Printing is **not** connected. "Mark as printed" records the job and uses up the sheet positions.
+The Linux (Pi) and Windows dongle detectors are written but not yet tried on real hardware.
 
-## Setup
+![Dashboard](docs/img/dashboard_session.png)
 
-```sh
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e '.[dev]'
-pytest
-```
+## Run it on your machine (Windows, macOS, or Linux)
 
-## Render labels
+Needs Python 3.11+.
 
 ```sh
-# Plain-paper alignment page for OL25SP (outlines, centre marks, 100 mm rulers, sample labels)
-macprinter align -o alignment.pdf
-
-# Put MACs into the next free cells; --used marks cells already peeled (row,col, 0-based)
-macprinter sheet --mac 9C-69-D3-9C-12-65 --mac 9c:69:d3:9c:12:66 \
-    --used 0,0 --used 0,1 -o sheet.pdf
-
-# Add --outlines to preview on plain paper; add --dx/--dy (mm) once calibrated
+git clone https://github.com/leftoverjacksons/macPrinter.git && cd macPrinter
+python -m venv .venv
+# Windows:      .venv\Scripts\activate
+# macOS/Linux:  source .venv/bin/activate
+pip install -e ".[dev]"
+macprinter serve
 ```
+
+Open <http://localhost:8000>. It starts with the **simulator**: plug in fake dongles from
+the dashboard (random or chosen MAC, with or without a permanent MAC, cable, or internet)
+to exercise the whole flow. Data lives in `./data/` (SQLite + job PDFs); delete it to start over.
+
+Real dongles:
+
+| Where | Command | Notes |
+|-------|---------|-------|
+| Windows PC | `macprinter serve --detector windows` | Experimental. Uses PowerShell `Get-NetAdapter`; labels the adapter's *permanent* address |
+| Raspberry Pi / Linux | `macprinter serve --detector linux` | Needs the network setup in [deploy/README.md](deploy/README.md) for the link/internet checks |
+
+## The workflow
+
+1. **Start session.**
+2. Plug in a dongle **with an Ethernet cable connected to a network that has DHCP and internet**.
+   Each dongle is checked:
+   - **MAC**: valid, burned into the dongle (not random), not already labeled.
+   - **Link**: Ethernet link comes up; speed reported (warns below 1000 Mb/s).
+   - **Internet**: gets a DHCP address, then fetches Google's connectivity check
+     (`connectivitycheck.gstatic.com/generate_204`) *through that dongle*.
+3. Passing dongles are queued. Failures show why, with **Retry**, and **Queue anyway**
+   where an override makes sense.
+4. **Finish & preview**: shows where each label goes on the current sheet and the exact PDF.
+5. **Mark as printed**: records the labels and uses up those positions. If the queue
+   doesn't fit, the rest stay queued for the next sheet.
+
+Checks can be turned off or tuned in **Settings**. The **Sheet** tab shows every label position;
+tap one to mark it used or void to match the physical sheet. **History** lists every labeled
+MAC with reprint and CSV export.
+
+## Command-line rendering
+
+```sh
+macprinter align -o alignment.pdf          # plain-paper alignment/calibration page
+macprinter sheet --mac 9C-69-D3-9C-12-65 --used 0,0 --used 0,1 -o sheet.pdf
+```
+
+Calibration: print `alignment.pdf` at 100 % scale (no fit-to-page) on plain paper, lay it on
+a label sheet against a light, measure the offset, and enter it in **Settings → Printer calibration**.
 
 ![Sample labels](docs/img/sheet_top.png)
 
-## Print (MF3010, milestone M0)
+## Deploy to the Raspberry Pi
 
-The PDF **must print at 100 %** — any fit-to-page scaling moves every label.
+Same code, `--detector linux`. See [deploy/README.md](deploy/README.md) (systemd service,
+NetworkManager profile for dongles under test, kiosk browser).
+
+## Tests
 
 ```sh
-lpstat -p                                  # find the queue name
-lpoptions -p <queue> -l                    # find the driver's media-type option
-lp -d <queue> -o media=Letter -o print-scaling=none -o fit-to-page=false alignment.pdf
+pytest
 ```
 
-Calibration: print `alignment.pdf` on plain paper, lay it on a label sheet
-against a light, and measure how far the outlines sit from the real labels.
-Check the 100 mm rulers measure 100 mm (if not, scaling is on somewhere).
-Re-render with `--dx` (+ = right) and `--dy` (+ = down) until they coincide.
-
-## Check a dongle
+## Check a dongle by hand (Linux)
 
 ```sh
 sudo tools/mac_probe.sh     # MAC, whether it's permanent, USB IDs, EEPROM dump

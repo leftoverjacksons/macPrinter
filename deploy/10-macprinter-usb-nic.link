@@ -1,0 +1,10 @@
+# /etc/systemd/network/10-macprinter-usb-nic.link
+# Stop systemd from replacing a missing/random dongle MAC with a machine-derived one
+# (DESIGN.md §4.2b); the kiosk must see exactly what the dongle reports.
+# Name interfaces enx<mac> so the name itself shows the MAC.
+[Match]
+Driver=ax88179_178a
+
+[Link]
+MACAddressPolicy=none
+NamePolicy=mac

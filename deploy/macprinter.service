@@ -1,0 +1,22 @@
+# /etc/systemd/system/macprinter.service
+[Unit]
+Description=macPrinter kiosk dashboard
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+User=macprinter
+WorkingDirectory=/opt/macprinter
+# --host 0.0.0.0 lets you open the dashboard from another PC on the LAN.
+# There is no login: use 127.0.0.1 instead if the network is not trusted.
+ExecStart=/opt/macprinter/.venv/bin/macprinter serve --detector linux --host 0.0.0.0 --port 8000 --data /var/lib/macprinter
+StateDirectory=macprinter
+# The internet check pins its socket to the dongle (SO_BINDTODEVICE), which needs CAP_NET_RAW.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

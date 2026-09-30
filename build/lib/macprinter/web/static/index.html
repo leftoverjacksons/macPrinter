@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>macPrinter</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232458d6'/%3E%3Cpath d='M4 4h3v3H4zM9 4h3v3H9zM4 9h3v3H4zM9 9h1v1H9zM11 11h1v1h-1z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">macPrinter</div>
+  <div class="chips" id="chips"></div>
+</header>
+<nav id="tabs">
+  <button data-tab="session" class="active">Session</button>
+  <button data-tab="sheet">Sheet</button>
+  <button data-tab="history">History</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+<div id="detector-error" class="banner error" hidden></div>
+
+<main>
+  <!-- SESSION -->
+  <section id="tab-session" class="tab">
+    <div id="session-bar" class="bar"></div>
+
+    <div id="session-main" class="cols">
+      <div class="col">
+        <h2>Dongles <span class="muted" id="det-count"></span></h2>
+        <div id="sim-panel" class="card sim" hidden>
+          <div class="sim-title">Simulator — plug in a fake dongle</div>
+          <div class="sim-row">
+            <input id="sim-mac" placeholder="MAC (blank = random)" spellcheck="false">
+            <label><input type="checkbox" id="sim-perm" checked> permanent MAC</label>
+            <label><input type="checkbox" id="sim-cable" checked> cable</label>
+            <label><input type="checkbox" id="sim-net" checked> internet</label>
+            <button class="btn" id="sim-plug">Plug in</button>
+          </div>
+        </div>
+        <div id="detections"></div>
+      </div>
+      <div class="col narrow">
+        <h2>Queue <span class="muted" id="queue-count"></span></h2>
+        <div id="queue" class="card list"></div>
+        <div id="queue-foot" class="muted small"></div>
+      </div>
+    </div>
+
+    <div id="preview" hidden>
+      <div class="bar">
+        <button class="btn" id="pv-back">← Back</button>
+        <label class="inline"><input type="checkbox" id="pv-outlines"> show label outlines (plain-paper test)</label>
+        <span class="spacer"></span>
+        <a class="btn" id="pv-download" download="labels.pdf">Download PDF</a>
+        <button class="btn primary" id="pv-commit">Mark as printed</button>
+      </div>
+      <div class="banner info">Printing isn't connected yet. <b>Mark as printed</b> records these labels and uses up
+        these positions on the sheet. The PDF is saved with the job.</div>
+      <div id="pv-stale" class="banner warn" hidden>The queue or sheet changed since this preview.
+        <button class="btn small" id="pv-refresh">Refresh preview</button></div>
+      <div id="pv-overflow" class="banner warn" hidden></div>
+      <div class="cols">
+        <div class="col narrow">
+          <h2>Placement</h2>
+          <div id="pv-grid" class="grid"></div>
+          <div class="legend"><span class="sw used"></span>used <span class="sw new"></span>new
+            <span class="sw void"></span>void <span class="sw free"></span>free</div>
+        </div>
+        <div class="col"><iframe id="pv-pdf" title="PDF preview"></iframe></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SHEET -->
+  <section id="tab-sheet" class="tab" hidden>
+    <div class="bar">
+      <div id="sheet-summary"></div>
+      <span class="spacer"></span>
+      <a class="btn" href="/api/alignment.pdf" target="_blank">Alignment page</a>
+      <button class="btn danger" id="new-sheet">Load new sheet…</button>
+    </div>
+    <p class="muted small">Click a label to cycle it free → used → void. Use this to match the screen
+      to the physical sheet (e.g. a damaged or already-peeled label).</p>
+    <div id="sheet-grid" class="grid big"></div>
+    <div class="legend"><span class="sw used"></span>used <span class="sw void"></span>void
+      <span class="sw free"></span>free</div>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="tab-history" class="tab" hidden>
+    <div class="bar">
+      <input id="hist-filter" placeholder="Filter by MAC…" spellcheck="false">
+      <span class="spacer"></span>
+      <button class="btn" id="hist-csv">Export CSV</button>
+    </div>
+    <table class="table">
+      <thead><tr><th>When</th><th>MAC</th><th>Sheet</th><th>Row</th><th>Col</th><th>Job</th><th></th><th></th></tr></thead>
+      <tbody id="hist-body"></tbody>
+    </table>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="tab" hidden>
+    <form id="settings-form" class="card form">
+      <h2>Printer calibration</h2>
+      <label>Offset right (mm) <input type="number" step="0.05" name="cal_dx_mm"></label>
+      <label>Offset down (mm) <input type="number" step="0.05" name="cal_dy_mm"></label>
+      <h2>Link check</h2>
+      <label class="check"><input type="checkbox" name="check_link"> Require Ethernet link</label>
+      <label>Wait for link (s) <input type="number" min="1" name="link_timeout_s"></label>
+      <label>Expected speed (Mb/s) <input type="number" min="10" name="expected_speed_mbps"></label>
+      <h2>Internet check</h2>
+      <label class="check"><input type="checkbox" name="check_internet"> Require internet through the dongle</label>
+      <label>Wait for DHCP (s) <input type="number" min="1" name="dhcp_timeout_s"></label>
+      <label>Check URL <input type="text" name="internet_url" spellcheck="false"></label>
+      <label>Request timeout (s) <input type="number" min="1" name="internet_timeout_s"></label>
+      <div class="bar"><span class="spacer"></span><button class="btn primary" type="submit">Save</button></div>
+    </form>
+  </section>
+</main>
+
+<div id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

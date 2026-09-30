@@ -1,0 +1,12 @@
+# OnlineLabels OL25SP — weatherproof silver polyester, laser.
+# Measured from the vendor template PDF (templates/OL25.pdf). Units: inches,
+# origin at the top-left of the page as it enters the printer.
+id: OL25SP
+vendor: OnlineLabels
+material: weatherproof silver polyester (laser)
+page:   { width: 8.5,  height: 11.0 }
+label:  { width: 1.75, height: 0.5, corner_radius: 0.047 }
+grid:   { cols: 4, rows: 20 }
+origin: { left: 0.33, top: 0.5 }
+pitch:  { x: 2.03125, y: 0.5 }
+fill_order: row-major

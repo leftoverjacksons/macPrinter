@@ -1,0 +1,26 @@
+# /etc/NetworkManager/system-connections/macprinter-dongle.nmconnection  (chmod 600)
+# Applies to every AX88179 dongle under test: get DHCP so the internet check can run,
+# but never become the Pi's preferred route, and never change the dongle's MAC.
+[connection]
+id=macprinter-dongle
+type=ethernet
+autoconnect=true
+autoconnect-priority=-10
+# 3 = "multiple": one profile may be active on several dongles at once
+multi-connect=3
+
+[match]
+driver=ax88179_178a;
+
+[ethernet]
+cloned-mac-address=preserve
+
+[ipv4]
+method=auto
+# Higher metric than the Pi's own uplink (100/600), so the Pi's traffic never uses a dongle.
+# The internet check still works because it binds to the dongle's interface explicitly.
+route-metric=900
+dhcp-timeout=30
+
+[ipv6]
+method=disabled

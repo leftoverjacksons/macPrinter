@@ -74,9 +74,9 @@ Goal: a Raspberry Pi–based kiosk that
 |--------------------|--------------------------------------------|-----------|
 | OS                 | Raspberry Pi OS Lite (Bookworm) + minimal X/Wayland for Chromium | Standard, well supported |
 | Language           | Python 3.11+                               | pyudev, reportlab, good Pi support |
-| USB/net detection  | `pyudev` monitor on `net` subsystem        | Event-driven; no polling |
-| Web backend        | FastAPI + WebSocket                        | Live push of detections to UI |
-| UI                 | Local web page, Chromium `--kiosk`         | Touchscreen-friendly; also reachable from another PC for debugging |
+| USB/net detection  | Pluggable `Detector`: **sim** (any OS), **linux** (polls `/sys/class/net`, 0.5 s), **windows** (PowerShell `Get-NetAdapter`, 2 s) | Develop on any PC; same code on the Pi. Polling sysfs is simpler than udev and fast enough |
+| Web backend        | FastAPI + server-sent events (SSE)         | Live push of state to the UI; auto-reconnect built into browsers |
+| UI                 | Plain HTML/CSS/JS, no build step; Chromium `--kiosk` on the Pi | Nothing to compile on the Pi; also reachable from another PC |
 | Persistence        | SQLite (WAL mode)                          | Single-file, transactional, survives power loss better than JSON |
 | QR generation      | `segno`                                    | Pure Python, vector output, explicit version/ECC control |
 | Label rendering    | `reportlab` → PDF with absolute mm coordinates | Precise placement; printer-independent |
@@ -209,11 +209,36 @@ MAC; the outlier PC was overriding it on the host side (cause 2). Blocker
 downgraded. Still to do later: check a batch of units for duplicate MACs, and
 confirm `addr_assign_type` = 0 on the Pi with `tools/mac_probe.sh`.
 
-### 4.3 Network isolation
-The kiosk must not attempt DHCP or route through the dongles under test.
-- Mark USB NICs unmanaged in NetworkManager (match by driver or by
-  `ID_BUS=usb`), keeping the Pi's own onboard Ethernet/Wi-Fi managed.
-- The Pi's own network connection is only needed if the printer is networked.
+### 4.3 Network handling (revised 2026-09-30)
+The internet check (§4.5) needs each dongle to get a DHCP address, so dongles
+are *managed*, but they must never carry the Pi's own traffic:
+- NetworkManager profile `deploy/macprinter-dongle.nmconnection`, matched by
+  driver `ax88179_178a`: DHCP, IPv6 off, `cloned-mac-address=preserve`,
+  `route-metric=900` (the Pi's own uplink has a lower metric and stays preferred),
+  `multi-connect=multiple` so several dongles can be up at once.
+- systemd `.link` file (`deploy/10-macprinter-usb-nic.link`):
+  `MACAddressPolicy=none`, `NamePolicy=mac` (interface named `enx<mac>`).
+- The internet check pins its socket to the dongle with `SO_BINDTODEVICE`, so the
+  request really leaves through the dongle regardless of route preference.
+  The service needs `CAP_NET_RAW` for that (granted in the systemd unit).
+- DNS resolution for the check uses the Pi's normal resolver, not the dongle.
+
+### 4.5 Link and internet checks (decided 2026-09-30)
+Physical setup: one Ethernet patch cable from a switch/router with DHCP and
+internet; the operator plugs it into each dongle along with the USB side.
+
+Per dongle, in order. A failure stops the later checks, which are shown as "not run".
+
+| Check | Pass condition | Default timeout | On failure |
+|-------|----------------|-----------------|------------|
+| MAC | Unicast, non-zero; permanent (`addr_assign_type`=0 / Windows `PermanentAddress`); not already labeled; not already in this session | — | Random MAC: blocked. Already labeled: "Queue as reprint" override. Locally administered / permanence unknown: warning only |
+| Link | Carrier up | 30 s | "Queue anyway" override. Speed below 1000 Mb/s is a warning |
+| Internet | DHCP address, then HTTP `GET http://connectivitycheck.gstatic.com/generate_204` through the dongle returns 204 | 25 s DHCP + 5 s request | "Queue anyway" override |
+
+Each check can be disabled and its timeouts/URL changed in Settings. Check
+results are stored with each queued/printed label (`info` JSON).
+An HTTP check is used rather than ICMP ping: it needs no raw sockets, passes
+through more firewalls, and proves DNS + TCP + HTTP work.
 
 ### 4.4 Removal
 Unplug events are informational only (UI shows "removed"). A queued MAC stays
@@ -369,6 +394,12 @@ Mitigations to evaluate before committing to the sheet-reuse workflow:
 Target: 7" touchscreen (or small monitor + mouse), large touch targets,
 glanceable from a standing position.
 
+**Implemented (2026-09-30)** as a web dashboard (`macprinter serve`); screenshots
+in `docs/img/dashboard_*.png`. Tabs: Session, Sheet, History, Settings. The
+Confirm step is replaced for now by **Mark as printed** (no printer connected).
+UI rule learned in testing: never rebuild unchanged DOM on state updates, or
+taps landing mid-rebuild are lost (`setHTML` diffing in `app.js`).
+
 ### Screens / states
 1. **Idle** — active sheet summary (e.g. "31 / 52 free"), buttons:
    *Start session*, *Sheet…*, *Settings*.
@@ -458,29 +489,29 @@ print path shifts every label. Verify with the alignment page.
 
 ---
 
-## 12. Proposed repository layout
+## 12. Repository layout
 
 ```
 macPrinter/
-├── DESIGN.md
-├── README.md
-├── pyproject.toml
+├── DESIGN.md, README.md, pyproject.toml
 ├── macprinter/
-│   ├── detector.py        # pyudev monitor, MAC validation
-│   ├── db.py              # SQLite schema + migrations
-│   ├── sheets.py          # templates, cell allocation, fill order
-│   ├── label.py           # LabelContent, QR generation
-│   ├── render_pdf.py      # sheet PDF renderer
-│   ├── backends/          # cups_sheet.py, zpl_roll.py (later)
-│   ├── api.py             # FastAPI + websocket
-│   └── web/               # kiosk UI (static HTML/JS)
-├── templates/             # sheet template YAMLs
-├── deploy/                # systemd unit, NM config, provisioning script
-└── tests/                 # allocation, rendering geometry, validation
+│   ├── cli.py             # `macprinter serve | align | sheet`
+│   ├── mac.py             # MAC parsing/formatting (9C-69-D3-9C-12-65)
+│   ├── sheets.py          # sheet templates, cell geometry, fill order
+│   ├── render_pdf.py      # label + sheet PDF renderer, alignment page
+│   ├── db.py              # SQLite schema and queries
+│   ├── service.py         # detection pipeline, checks, sessions, allocation, commit
+│   ├── detect/            # base.py (interface + HTTP check), sim.py, linux.py, windows.py
+│   ├── templates/         # sheet template YAMLs (OL25SP.yaml)
+│   └── web/               # app.py (FastAPI + SSE), static/ (dashboard HTML/CSS/JS)
+├── templates/OL25.pdf     # vendor template, source of the OL25SP geometry
+├── deploy/                # systemd unit, NetworkManager profile, .link file, Pi guide
+├── tools/mac_probe.sh     # manual dongle diagnostics
+├── docs/img/              # screenshots
+└── tests/                 # geometry, rendering/QR decode, API flows, detector parsing
 ```
 
-Dev note: detector must be mockable so the rest of the system runs on a
-laptop without dongles (fake "plug in MAC" button in a dev mode).
+A printer backend (`backends/`) and Google Sheets sync are not written yet.
 
 ---
 
@@ -497,8 +528,10 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
    *Status: renderer + alignment page implemented and tested (QR decodes at
    600 dpi); calibration on the MF3010 pending.*
 4. **M3 – State + allocation:** SQLite, sessions, cell allocation, commit
-   semantics, unit tests.
-5. **M4 – Kiosk UI:** full workflow on touchscreen.
+   semantics, unit tests. *(Status: done — preview token guards against committing a
+   stale preview; overflow continues on the next sheet; API tests.)*
+5. **M4 – Kiosk UI:** full workflow on touchscreen. *(Status: dashboard done with simulator;
+   Linux/Windows detectors untested on hardware; Pi deploy files written, untested.)*
 6. **M5 – Hardening:** provisioning script, backups, power-loss testing.
 7. **M6 – Roll printer backend** (Phase 2).
 
@@ -515,7 +548,7 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 5 | Additional label text? | | **closed:** none |
 | 6 | Who/what scans the QR downstream, and with what device? | | open |
 | 7 | Reprint a MAC that was already labeled? | | **closed:** yes, low priority (warn + confirm) |
-| 8 | Link test (cable into dongle, verify carrier + speed) as part of the flow? | | open — awaiting decision |
+| 8 | Link test as part of the flow? | | **closed:** yes, link + internet (HTTP to Google) checks, §4.5 |
 | 9 | Export/integration target? | | **closed:** Google Sheet (service account, outbox) |
 | 10 | Display: touchscreen size, or monitor + keyboard? | | open |
 | 11 | One operator station, or multiple kiosks sharing state? | | open |
@@ -539,3 +572,7 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 2026-09-30 | Unstable MAC was observed on Windows; final product host is a Raspberry Pi (Linux) | User input; makes remedy D viable, adds systemd pitfall |
 | 2026-09-30 | MAC confirmed stable on all but one PC; proceed, duplicate check deferred | User test |
 | 2026-09-30 | Renderer: QR modules drawn on the 600 dpi dot grid after calibration offset; text auto-sized to fit (≤ 9 pt Courier-Bold) | Keeps every module exactly 10 dots; prevents text overflow |
+| 2026-09-30 | Link + internet checks per dongle; internet = HTTP 204 from Google through the dongle | User request; proves the dongle works end-to-end |
+| 2026-09-30 | Dongles get DHCP via an NM profile with route-metric 900 (replaces "unmanaged") | Internet check needs an address; high metric keeps Pi traffic off dongles |
+| 2026-09-30 | Detectors poll (sysfs / PowerShell) behind one interface; simulator for development | Develop on any OS, same code on the Pi |
+| 2026-09-30 | Dashboard = FastAPI + SSE + plain JS; no printing yet ("Mark as printed" commits) | User request: stop at showing the document |
