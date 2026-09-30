@@ -127,6 +127,62 @@ reboots; MAC must be identical and `addr_assign_type` must be 0.
 Note: on Linux, predictable interface naming may name the interface
 `enx9c69d39c1265` — the MAC itself — which is a handy sanity check.
 
+### 4.2b ⚠️ Finding (2026-09-30): MAC changes between plug-ins
+Observed: the same AX88179 dongle reports a **different MAC on re-plug**.
+Without a stable MAC there is nothing meaningful to label, so this blocks the
+project until resolved.
+
+**How the MAC normally gets there.** At power-on the AX88179 loads its MAC
+from an external EEPROM into its node-ID register. The Linux driver
+(`ax88179_178a`, `ax88179_get_mac_addr()`) reads that register; if the value is
+not a valid unicast address it logs `invalid MAC address, using random` and
+the kernel generates a random, locally administered MAC
+(`addr_assign_type` = 1). A new random value is generated on every plug-in.
+
+**Candidate causes, in order of likelihood:**
+1. **Blank/absent EEPROM** — cheap dongles often omit programming it (or omit
+   the chip). Evidence: dmesg message above; `addr_assign_type` = 1; first
+   octet has the locally administered bit set (2nd hex digit 2/6/A/E);
+   `ethtool -e` returns all `ff`/`00`.
+2. **Host software overriding the MAC** (NetworkManager
+   `cloned-mac-address=random/stable`, Windows adapter "Network Address"
+   property). Evidence: `addr_assign_type` = 3 and `ethtool -P` shows a
+   different, stable permanent address. Fix is host configuration only.
+3. A different driver binding (e.g. `cdc_ncm`) that obtains the MAC another
+   way. Evidence: `driver` field in the probe output.
+
+**Diagnosis tool:** `sudo tools/mac_probe.sh` after each plug-in; compare two
+plug-ins of the same unit, and a few different units.
+
+**Remedies (choose after diagnosis):**
+
+| Option | What | Pros | Cons |
+|--------|------|------|------|
+| A. Fix host | Cause 2 only: stop the host overriding the MAC | No hardware change | Only applies if EEPROM is actually programmed |
+| B. Supplier | Buy dongles with an EEPROM programmed with unique MACs from a registered OUI; verify samples with the probe | Kiosk design unchanged; MAC works on any host | Different/pricier SKU; must verify every new lot |
+| C. Program at the kiosk | Kiosk **assigns** a MAC, writes it to the dongle's EEPROM, re-enumerates, verifies `addr_assign_type`=0 and the value, then labels | Uses current dongles; MACs unique by construction (allocated from our DB) | Requires an EEPROM chip to be present; must know the EEPROM layout/checksum; a bad write can leave a unit unusable; needs a MAC source (below) |
+| D. Fix MAC in our product's software | Our device sets a fixed MAC on the interface (e.g. systemd `.link` `MACAddress=`) | No dongle modification | MAC belongs to the product, not the dongle; label on the dongle no longer meaningful if dongles are swapped; only works on hosts we control |
+
+**Option C details (if chosen):**
+- Linux supports it directly: `ethtool -E <iface> magic 0x17900b95 offset <n> value <b>`
+  (magic = AX88179 EEPROM magic in the driver). ASIX also publishes
+  vendor EEPROM programming tools; the EEPROM layout (MAC offset, checksum)
+  must come from ASIX documentation or a dump of a correctly programmed unit.
+  Try on 1–2 sacrificial dongles first.
+- MAC source:
+  - **Locally administered addresses** (first octet `x2`/`x6`/`xA`/`xE`):
+    free, standards-legitimate, uniqueness guaranteed only within our
+    allocations.
+  - **IEEE-registered block** (MA-S = 4,096 addresses, MA-M ≈ 1M, MA-L ≈ 16M):
+    globally unique; costs a registration fee.
+- Kiosk flow becomes: detect → allocate next MAC from DB → write → re-plug
+  or USB reset → verify → queue label. Allocation and label are recorded
+  in one transaction so a MAC is never issued twice.
+
+**Identifying a dongle independent of MAC:** USB serial number
+(`/sys/bus/usb/devices/*/serial`) if present and unique per unit — cheap
+dongles often have none or a shared constant value. Probe output will show.
+
 ### 4.3 Network isolation
 The kiosk must not attempt DHCP or route through the dongles under test.
 - Mark USB NICs unmanaged in NetworkManager (match by driver or by
@@ -435,6 +491,7 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 9 | Export/integration target? | | **closed:** Google Sheet (service account, outbox) |
 | 10 | Display: touchscreen size, or monitor + keyboard? | | open |
 | 11 | One operator station, or multiple kiosks sharing state? | | open |
+| 13 | AX88179 MAC is not stable across plug-ins: root cause (blank EEPROM vs host override) and remedy A/B/C/D (§4.2b) | | **open — blocker** |
 | 12 | Does silver polyester survive the MF3010 fuser, and does a partially used sheet re-feed without jamming? | | open — M0 test |
 
 ---
@@ -450,3 +507,4 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 2026-09-30 | Label = `9C-69-D3-9C-12-65` text + QR of same string, nothing else | User input |
 | 2026-09-30 | QR: V1-M alphanumeric, 10-dot (0.423 mm) modules at 600 dpi | Fits 0.5" label height with full quiet zone |
 | 2026-09-30 | Google Sheet sync via service account + local outbox | Offline-tolerant; SQLite stays source of truth |
+| 2026-09-30 | Observed unstable MAC on AX88179 re-plug; added diagnosis + remedy options | Test result from user |
