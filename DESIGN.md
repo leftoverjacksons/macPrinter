@@ -100,7 +100,7 @@ labels** if not detected:
 
 | Risk | Detection | Action |
 |------|-----------|--------|
-| No EEPROM → driver assigns a **random MAC** each plug-in | `/sys/class/net/<iface>/addr_assign_type` ≠ 0 (0 = permanent/burned-in) | Reject with a visible error; do not print |
+| No EEPROM → driver assigns a **random MAC** each plug-in | `/sys/class/net/<iface>/addr_assign_type` ≠ 0 (0 = permanent/burned-in; 1 = random; 3 = set by host, e.g. systemd) | Reject with a visible error; do not print |
 | **Duplicate MACs** across units (clone chips with a shared default, e.g. Realtek default ranges) | Lookup in `dongles` table of all previously labeled MACs | Warn prominently; require operator override |
 | Same dongle re-plugged in the same session | Session-level dedupe | Ignore / show "already queued" |
 | Host software rewrites MAC (NetworkManager cloned-MAC, etc.) | Configure NM to leave USB NICs **unmanaged**; prefer permanent address (`ethtool -P` / `addr_assign_type`) | Documented in provisioning |
@@ -128,7 +128,14 @@ Note: on Linux, predictable interface naming may name the interface
 `enx9c69d39c1265` — the MAC itself — which is a handy sanity check.
 
 ### 4.2b ⚠️ Finding (2026-09-30): MAC changes between plug-ins
-Observed: the same AX88179 dongle reports a **different MAC on re-plug**.
+Observed: the same AX88179 dongle reports a **different MAC on re-plug**
+(seen on Windows via `ipconfig /all`). Since Windows is not in the final
+system, re-confirm on the Pi with `tools/mac_probe.sh`.
+
+Windows check (PowerShell) that separates cause 1 from cause 2:
+`Get-NetAdapter | Format-List Name, InterfaceDescription, MacAddress, PermanentAddress`
+— and in Device Manager → adapter → Advanced, "Network Address" should be
+*Not Present*. If `PermanentAddress` is empty/changes, the dongle stores no MAC.
 Without a stable MAC there is nothing meaningful to label, so this blocks the
 project until resolved.
 
@@ -148,8 +155,21 @@ the kernel generates a random, locally administered MAC
    `cloned-mac-address=random/stable`, Windows adapter "Network Address"
    property). Evidence: `addr_assign_type` = 3 and `ethtool -P` shows a
    different, stable permanent address. Fix is host configuration only.
-3. A different driver binding (e.g. `cdc_ncm`) that obtains the MAC another
+3. **systemd on Linux** (relevant to both kiosk and product, see below).
+4. A different driver binding (e.g. `cdc_ncm`) that obtains the MAC another
    way. Evidence: `driver` field in the probe output.
+
+**systemd pitfall (Linux, incl. Raspberry Pi OS).** systemd-udevd's default
+`MACAddressPolicy=persistent` replaces a *random* kernel MAC with one derived
+from the host's `/etc/machine-id` and the interface name
+(`addr_assign_type` becomes 3). Consequences:
+- On the **kiosk**, every blank dongle enumerating under the same interface
+  name would get the **same** MAC — a silent duplicate-label generator.
+  Mitigation: kiosk ships a `.link` file with `MACAddressPolicy=none` for USB
+  NICs, and the detector accepts **only** `addr_assign_type` = 0.
+- On the **product**, the same blank dongle would show a MAC that depends on
+  which product Pi it is plugged into — i.e. different from anything the
+  kiosk could print.
 
 **Diagnosis tool:** `sudo tools/mac_probe.sh` after each plug-in; compare two
 plug-ins of the same unit, and a few different units.
@@ -161,7 +181,7 @@ plug-ins of the same unit, and a few different units.
 | A. Fix host | Cause 2 only: stop the host overriding the MAC | No hardware change | Only applies if EEPROM is actually programmed |
 | B. Supplier | Buy dongles with an EEPROM programmed with unique MACs from a registered OUI; verify samples with the probe | Kiosk design unchanged; MAC works on any host | Different/pricier SKU; must verify every new lot |
 | C. Program at the kiosk | Kiosk **assigns** a MAC, writes it to the dongle's EEPROM, re-enumerates, verifies `addr_assign_type`=0 and the value, then labels | Uses current dongles; MACs unique by construction (allocated from our DB) | Requires an EEPROM chip to be present; must know the EEPROM layout/checksum; a bad write can leave a unit unusable; needs a MAC source (below) |
-| D. Fix MAC in our product's software | Our device sets a fixed MAC on the interface (e.g. systemd `.link` `MACAddress=`) | No dongle modification | MAC belongs to the product, not the dongle; label on the dongle no longer meaningful if dongles are swapped; only works on hosts we control |
+| D. Fix MAC in our product's software | Our product is a Raspberry Pi, so it can assign the interface a fixed MAC from our allocated range (systemd `.link`: `MACAddress=`), stored in the product's config | No dongle modification; dongles interchangeable; MAC survives a dongle swap (good for customer DHCP reservations / allow-lists) | MAC belongs to the **product**, not the dongle — the label goes on the product (or its packaging) at product provisioning, and the dongle kiosk is no longer needed in its current form |
 
 **Option C details (if chosen):**
 - Linux supports it directly: `ethtool -E <iface> magic 0x17900b95 offset <n> value <b>`
@@ -508,3 +528,4 @@ laptop without dongles (fake "plug in MAC" button in a dev mode).
 | 2026-09-30 | QR: V1-M alphanumeric, 10-dot (0.423 mm) modules at 600 dpi | Fits 0.5" label height with full quiet zone |
 | 2026-09-30 | Google Sheet sync via service account + local outbox | Offline-tolerant; SQLite stays source of truth |
 | 2026-09-30 | Observed unstable MAC on AX88179 re-plug; added diagnosis + remedy options | Test result from user |
+| 2026-09-30 | Unstable MAC was observed on Windows; final product host is a Raspberry Pi (Linux) | User input; makes remedy D viable, adds systemd pitfall |
