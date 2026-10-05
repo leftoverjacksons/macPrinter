@@ -19,9 +19,14 @@ MODULE_DOTS = 10                  # QR module = 10 dots = 0.423 mm (DESIGN.md §
 MODULE = MODULE_DOTS * DOT
 FONT = "Courier-Bold"
 MAX_FONT_SIZE = 9.0
-QR_MARGIN = 1.9 * mm              # label edge to QR; also the QR quiet zone
-TEXT_GAP = 1.9 * mm               # QR to text
-RIGHT_MARGIN = 1.2 * mm
+MIN_ONE_LINE_SIZE = 6.0           # below this, wrap the MAC onto two lines instead
+QUIET = 4 * MODULE                # QR quiet zone (4 modules, per the QR spec)
+QR_MARGIN = QUIET                 # label edge to QR
+TEXT_GAP = QUIET                  # QR to text; text inside the quiet zone hurts decoding
+RIGHT_MARGIN = 0.8 * mm
+CAP_HEIGHT = 0.57                 # Courier cap height, in em
+LEADING = 1.25                    # line spacing, in em
+ADVANCE = 0.6                     # Courier character advance, in em
 
 
 @dataclass(frozen=True)
@@ -91,10 +96,21 @@ def draw_label(page: _Page, r: Rect, mac: str) -> None:
                 j += 1
 
     tx = qx + qr_size + TEXT_GAP
-    avail = r.x + r.w - RIGHT_MARGIN - tx
-    size = min(MAX_FONT_SIZE, avail / (len(text) * 0.6))   # Courier advance = 0.6 em
-    baseline = r.y + r.h / 2 + 0.3 * size                   # ~centres cap height
-    page.text(tx, baseline, text, size=size)
+    lines, size = text_layout(text, r.x + r.w - RIGHT_MARGIN - tx)
+    block = (CAP_HEIGHT + LEADING * (len(lines) - 1)) * size
+    baseline = r.y + (r.h - block) / 2 + CAP_HEIGHT * size   # centre the cap-height block
+    for i, line in enumerate(lines):
+        page.text(tx, baseline + i * LEADING * size, line, size=size)
+
+
+def text_layout(text: str, avail_w: float) -> tuple[list[str], float]:
+    """One line if it fits at a readable size, else split 9C-69-D3 / 9C-12-65."""
+    one = avail_w / (len(text) * ADVANCE)
+    if one >= MIN_ONE_LINE_SIZE:
+        return [text], min(MAX_FONT_SIZE, one)
+    parts = text.split("-")
+    lines = ["-".join(parts[:3]), "-".join(parts[3:])]
+    return lines, min(MAX_FONT_SIZE, avail_w / (max(map(len, lines)) * ADVANCE))
 
 
 def _outline(page: _Page, tpl: SheetTemplate, r: Rect) -> None:

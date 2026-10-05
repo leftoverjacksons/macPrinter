@@ -34,6 +34,7 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((s) => (s.hidden = s.id !== `tab-${name}`));
   if (name === "history") loadHistory();
   if (name === "settings") fillSettings();
+  if (name === "sheet") loadTemplates();
   render();
 }
 
@@ -172,7 +173,7 @@ function renderPreviewState() {
   $("pv-overflow").textContent = `${preview.overflow} queued dongle(s) don't fit on this sheet. They stay queued; load a new sheet after marking this one printed.`;
   $("pv-commit").disabled = !preview.placements.length;
   const newCells = new Map(preview.placements.map((p) => [`${p.row},${p.col}`, p.mac]));
-  $("pv-grid").style.gridTemplateColumns = `repeat(${S.sheet.cols}, auto)`;
+  sizeGrid($("pv-grid"), S.sheet.cols, 64);
   setHTML($("pv-grid"), gridHtml(S.sheet, newCells, false));
 }
 
@@ -196,8 +197,14 @@ function renderSheet() {
   setHTML($("sheet-summary"), `<b>Sheet #${sh.id}</b> · ${esc(sh.template)} · loaded ${fmtTime(sh.created_at)} ·
     <b>${sh.free}</b> free · ${used} used · ${voids} void`);
   const g = $("sheet-grid");
-  g.style.gridTemplateColumns = `repeat(${sh.cols}, auto)`;
+  sizeGrid(g, sh.cols, 150);
   setHTML(g, gridHtml(sh, new Map(), true));
+}
+
+// Columns shrink to fit narrow screens but never grow past cellPx; width tracks the column count.
+function sizeGrid(el, cols, cellPx) {
+  el.style.gridTemplateColumns = `repeat(${cols}, minmax(0, ${cellPx}px))`;
+  el.style.maxWidth = `${cols * (cellPx + 2) + 12}px`;
 }
 
 async function cycleCell(r, c) {
@@ -207,10 +214,16 @@ async function cycleCell(r, c) {
   await api("POST", "/api/sheet/cell", { row: r, col: c, state: next });
 }
 $("new-sheet").addEventListener("click", async () => {
-  if (!confirm("Load a new, empty sheet? The current sheet is retired and its remaining labels are no longer tracked.")) return;
-  await api("POST", "/api/sheet/new", {});
-  toast("New sheet loaded.");
+  const tpl = $("tpl-select").value;
+  if (!confirm(`Load a new, empty ${tpl} sheet? The current sheet is retired and its remaining labels are no longer tracked.`)) return;
+  await api("POST", "/api/sheet/new", { template: tpl });
+  toast(`New ${tpl} sheet loaded.`);
 });
+async function loadTemplates() {
+  const list = await api("GET", "/api/templates");
+  const cur = S ? S.settings.template : "";
+  $("tpl-select").innerHTML = list.map((t) => `<option ${t === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
+}
 
 // ---------------------------------------------------------------- history
 async function loadHistory() { history = await api("GET", "/api/history"); renderHistory(); }

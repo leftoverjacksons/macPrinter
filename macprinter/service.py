@@ -22,7 +22,7 @@ from .sheets import SheetTemplate
 log = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS = {
-    "template": "OL25SP",
+    "template": "AVERY60519",
     "cal_dx_mm": 0.0,
     "cal_dy_mm": 0.0,
     "check_link": True,

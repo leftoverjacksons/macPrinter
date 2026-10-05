@@ -2,7 +2,8 @@
 
 Kiosk that reads the MAC address of a USB-Ethernet dongle, checks the dongle works
 (Ethernet link + internet through it), and lays out QR + text labels onto partially
-used label sheets. See [DESIGN.md](DESIGN.md) for requirements, decisions, and open questions.
+used label sheets: **Avery PermaTrack 60519** (1" × ½", 84/sheet) by default, or
+OnlineLabels OL25SP. Pick the stock when loading a new sheet (Sheet tab). See [DESIGN.md](DESIGN.md) for requirements, decisions, and open questions.
 
 **Status:** dashboard, simulated dongles, checks, sheet tracking, and PDF preview work.
 Printing is **not** connected. "Mark as printed" records the job and uses up the sheet positions.
@@ -58,6 +59,7 @@ MAC with reprint and CSV export.
 ```sh
 macprinter align -o alignment.pdf          # plain-paper alignment/calibration page
 macprinter sheet --mac 9C-69-D3-9C-12-65 --used 0,0 --used 0,1 -o sheet.pdf
+macprinter --template OL25SP align -o ol25-alignment.pdf   # other stock
 ```
 
 Calibration: print `alignment.pdf` at 100 % scale (no fit-to-page) on plain paper, lay it on

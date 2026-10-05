@@ -1,0 +1,12 @@
+# Avery PermaTrack metallic asset tags 60519 — silver, laser, 1" x 1/2", 84 per sheet.
+# Measured from the Avery template PDF (templates/AVERY60519.pdf). Units: inches,
+# origin at the top-left of the page as it enters the printer.
+id: AVERY60519
+vendor: Avery
+material: PermaTrack metallic (silver) asset tag, laser
+page:   { width: 8.5,  height: 11.0 }
+label:  { width: 1.0, height: 0.5, corner_radius: 0.09375 }
+grid:   { cols: 6, rows: 14 }
+origin: { left: 0.4375, top: 0.55 }
+pitch:  { x: 1.325, y: 0.725 }               # col gap 0.325", row gap 0.225"
+fill_order: row-major

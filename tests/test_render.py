@@ -1,6 +1,6 @@
 import pytest
 
-from macprinter.render_pdf import Calibration, qr_matrix, render_alignment, render_sheet
+from macprinter.render_pdf import Calibration, qr_matrix, render_alignment, render_sheet, text_layout
 from macprinter.sheets import PT_PER_IN, SheetTemplate
 
 
@@ -32,18 +32,24 @@ def _decode_cells(pdf_path, tpl, cells, dpi=600):
     return out
 
 
-def test_rendered_qr_decodes(tmp_path):
-    tpl = SheetTemplate.load("OL25SP")
-    placements = {(0, 0): "9C-69-D3-9C-12-65", (7, 2): "00-0E-C6-AB-CD-EF", (19, 3): "02-00-00-00-00-01"}
+TEMPLATES = ["AVERY60519", "OL25SP"]
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_rendered_qr_decodes(tmp_path, template):
+    tpl = SheetTemplate.load(template)
+    last = (tpl.rows - 1, tpl.cols - 1)
+    placements = {(0, 0): "9C-69-D3-9C-12-65", (7, 2): "00-0E-C6-AB-CD-EF", last: "02-00-00-00-00-01"}
     pdf = tmp_path / "s.pdf"
     render_sheet(tpl, placements, str(pdf), Calibration(0.4, -0.3), outlines=True)
     assert _decode_cells(pdf, tpl, placements) == placements
 
 
-def test_content_stays_inside_label(tmp_path):
-    """Nothing may be drawn within 1.5 mm of the top/bottom edge (rows are butt-cut)."""
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_content_stays_inside_label(tmp_path, template):
+    """Nothing within 1.5 mm of the top/bottom edge (OL25 rows are butt-cut); text inside the label."""
     fitz = pytest.importorskip("pymupdf")
-    tpl = SheetTemplate.load("OL25SP")
+    tpl = SheetTemplate.load(template)
     pdf = tmp_path / "s.pdf"
     render_sheet(tpl, {(3, 1): "9C-69-D3-9C-12-65"}, str(pdf))
     page = fitz.open(str(pdf))[0]
@@ -53,9 +59,12 @@ def test_content_stays_inside_label(tmp_path):
         b = d["rect"]
         assert b.y0 >= r.y + margin - 0.01 and b.y1 <= r.y + r.h - margin + 0.01
         assert b.x0 >= r.x and b.x1 <= r.x + r.w
+    lines = [ln for blk in page.get_text("blocks") for ln in blk[4].split("\n") if ln]
+    assert "-".join(lines) == "9C-69-D3-9C-12-65"           # one line, or wrapped at the middle dash
     for b in page.get_text("blocks"):
         x0, y0, x1, y1 = b[:4]
         assert x0 >= r.x and x1 <= r.x + r.w
+        assert y0 >= r.y and y1 <= r.y + r.h
 
 
 def test_alignment_page_renders(tmp_path):
@@ -63,3 +72,24 @@ def test_alignment_page_renders(tmp_path):
     pdf = tmp_path / "a.pdf"
     render_alignment(tpl, str(pdf))
     assert pdf.stat().st_size > 1000
+
+
+def test_text_wraps_on_narrow_labels():
+    avery = SheetTemplate.load("AVERY60519")
+    lines, size = text_layout("9C-69-D3-9C-12-65", 34.9)          # ~available width on a 1" label
+    assert lines == ["9C-69-D3", "9C-12-65"] and size >= 7.0
+    lines, size = text_layout("9C-69-D3-9C-12-65", 89.0)          # OL25: one line
+    assert lines == ["9C-69-D3-9C-12-65"] and size >= 8.5
+    assert avery.label_w == 1.0
+
+
+@pytest.mark.parametrize("template,n_lines", [("AVERY60519", 2), ("OL25SP", 1)])
+def test_rendered_text_lines_and_size(tmp_path, template, n_lines):
+    fitz = pytest.importorskip("pymupdf")
+    tpl = SheetTemplate.load(template)
+    pdf = tmp_path / "s.pdf"
+    render_sheet(tpl, {(0, 0): "9C-69-D3-9C-12-65"}, str(pdf))
+    spans = [sp for b in fitz.open(str(pdf))[0].get_text("dict")["blocks"]
+             for ln in b.get("lines", []) for sp in ln["spans"]]
+    assert len(spans) == n_lines
+    assert min(sp["size"] for sp in spans) >= 7.0

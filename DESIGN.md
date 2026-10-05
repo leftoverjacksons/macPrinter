@@ -1,7 +1,8 @@
 # macPrinter — Design Document
 
-Status: **Draft / planning** — no code yet. Hardware fixed: ASIX AX88179 dongles,
-OnlineLabels OL25SP sheets, Canon imageCLASS MF3010 (USB). This document records requirements,
+Status: **In development** — dashboard, checks, sheet tracking and PDF preview work;
+printing not connected. Hardware: ASIX AX88179 dongles, **Avery 60519** metallic asset-tag
+sheets (OL25SP still supported), Canon imageCLASS MF3010 (USB). This document records requirements,
 decisions, risks, and open questions. Update it whenever a decision is made or
 changed; record the change in the Decision Log at the bottom.
 
@@ -26,7 +27,8 @@ Goal: a Raspberry Pi–based kiosk that
 
 ### Phase 1 (initial)
 - Printer: office **laser printer** (network or USB, via CUPS).
-- Media: sheets of **metallized polyester labels** (laser-compatible).
+- Media: sheets of **metallic laser labels**. Default stock: **Avery PermaTrack 60519**
+  (1" × ½", 84/sheet). OnlineLabels OL25SP (1.75" × ½", 80/sheet) remains selectable.
 - Batch workflow: start session → plug in N dongles → review → print all at
   once onto the next free positions of the current sheet.
 - Persistent sheet state across sessions and reboots.
@@ -259,25 +261,31 @@ other text on the label.
   lowercase would force byte mode and a larger symbol.
 - **Human-readable text:** same string, bold monospace, right of the QR code.
 
-### 5.1 Layout on an OL25 label (1.75" × 0.5" = 44.45 × 12.70 mm)
+### 5.1 Label layout (same rules for every template)
 Printer is 600 dpi, so module size is chosen as an integer number of dots
 to avoid uneven modules:
 
 | Element | Value |
 |---------|-------|
 | QR module | 10 dots = 0.423 mm |
-| QR symbol | 21 modules = 8.89 mm square |
-| QR quiet zone | 1.9 mm top/bottom (≈4.5 modules — meets the 4-module spec) |
-| QR left edge | 1.9 mm from label left edge |
-| Text region | x ≈ 12.7 mm → 42.9 mm (≈30 mm wide), vertically centred |
-| Text size | ≈ 8 pt Courier-Bold / DejaVu Sans Mono Bold (17 chars × 0.6 em ≈ 29 mm) |
+| QR symbol | 21 modules = 8.89 mm square, vertically centred |
+| QR quiet zone | 4 modules (1.69 mm) left of the QR and between QR and text; ≈1.9 mm top/bottom on ½"-tall labels |
+| Text | Courier-Bold, vertically centred, 0.8 mm right margin, ≤ 9 pt |
+| Line breaking | One line if it fits at ≥ 6 pt; otherwise two lines split at the middle dash: `9C-69-D3` / `9C-12-65` |
 
-8 pt is readable but small. Alternative if needed: two lines
-(`9C-69-D3` / `9C-12-65`) at ≈ 11 pt. Default is one line, per requirement.
+Result per stock:
 
-**Safe zone:** OL25 rows are butt-cut (zero vertical gap, see §6.1), so keep
-all ink ≥ 1.5 mm from the top and bottom label edges; vertical misregistration
-otherwise prints onto the neighbouring label.
+| Stock | Label | Text width available | Text |
+|-------|-------|----------------------|------|
+| **Avery 60519** | 1" × ½" (25.4 × 12.7 mm) | ≈ 12.3 mm | **two lines, ≈ 7.3 pt** (one line would be ≈ 3.6 pt — unreadable) |
+| OL25SP | 1.75" × ½" (44.45 × 12.7 mm) | ≈ 31.4 mm | one line, ≈ 8.7 pt |
+
+Same string, same QR on both; only the wrapping differs. Tests check that the
+QR decodes from a 600 dpi render on both stocks and that text stays ≥ 7 pt.
+
+**Safe zone:** keep all ink ≥ 1.5 mm from the top and bottom label edges. This
+matters most on OL25, whose rows are butt-cut (no vertical gap); Avery 60519
+has a 0.225" gap between rows.
 - **Metallized media caveat:** glossy/metallic surfaces can cause specular
   glare that defeats some scanners. Validate scanning with the actual scanners
   used downstream (phone camera, handheld imager) early.
@@ -293,10 +301,29 @@ same content model feeds both the sheet PDF renderer and a future ZPL renderer.
 
 ## 6. Sheet model & state tracking
 
-### 6.1 Sheet template (configuration, YAML)
-Geometry of **OnlineLabels OL25SP** (weatherproof silver polyester, laser),
-measured from the vendor template PDF (`OL25.pdf`, 612 × 792 pt page). Units
-are inches in the source; the template file stores inches to avoid rounding:
+### 6.1 Sheet templates (configuration, YAML)
+Templates live in `macprinter/templates/*.yaml`; the vendor PDFs they were
+measured from are kept in `templates/`. Units: inches, origin at the top-left of
+the page as it enters the printer. Adding a stock = adding one YAML file; it
+then appears in the dashboard's "Load new sheet" picker.
+
+**Avery PermaTrack 60519** (default) — metallic silver asset tags, laser,
+from Avery's template PDF (`templates/AVERY60519.pdf`, drawn in 0.1 pt units):
+```yaml
+id: AVERY60519
+page:   { width: 8.5,  height: 11.0 }        # US Letter
+label:  { width: 1.0, height: 0.5, corner_radius: 0.09375 }
+grid:   { cols: 6, rows: 14 }                # 84 labels / sheet
+origin: { left: 0.4375, top: 0.55 }
+pitch:  { x: 1.325, y: 0.725 }               # col gap 0.325", row gap 0.225"
+fill_order: row-major
+```
+Derived from the PDF: column x-origins 31.5 / 126.9 / 222.3 / 317.7 / 413.1 /
+508.5 pt; first row top at 39.6 pt from the top edge; last row's bottom edge
+37.8 pt above the page bottom.
+
+**OnlineLabels OL25SP** — weatherproof silver polyester, laser,
+from the vendor template PDF (`OL25.pdf`, 612 × 792 pt page):
 ```yaml
 id: OL25SP
 vendor: OnlineLabels
@@ -502,9 +529,9 @@ macPrinter/
 │   ├── db.py              # SQLite schema and queries
 │   ├── service.py         # detection pipeline, checks, sessions, allocation, commit
 │   ├── detect/            # base.py (interface + HTTP check), sim.py, linux.py, windows.py
-│   ├── templates/         # sheet template YAMLs (OL25SP.yaml)
+│   ├── templates/         # sheet template YAMLs (AVERY60519.yaml, OL25SP.yaml)
 │   └── web/               # app.py (FastAPI + SSE), static/ (dashboard HTML/CSS/JS)
-├── templates/OL25.pdf     # vendor template, source of the OL25SP geometry
+├── templates/             # vendor template PDFs the YAML geometry was measured from
 ├── deploy/                # systemd unit, NetworkManager profile, .link file, Pi guide
 ├── tools/mac_probe.sh     # manual dongle diagnostics
 ├── docs/img/              # screenshots
@@ -520,7 +547,7 @@ A printer backend (`backends/`) and Google Sheets sync are not written yet.
 1. **M0 – Hardware validation:** (a) AX88179 MAC stable across 5 re-plugs and
    2 reboots, `addr_assign_type`=0, no duplicates across ~10 units;
    (b) install `cnrdrvcups-lb` on the Pi and print a test page on the MF3010;
-   (c) print one full OL25SP sheet — check toner adhesion/fusing on silver
+   (c) print one full Avery 60519 sheet — check toner adhesion/fusing on metallic
    polyester and QR scan reliability; (d) peel a few labels from the trailing
    end and re-feed that sheet — check for jams/lifting.
 2. **M1 – Detection CLI:** prints MAC + validation to terminal on plug-in.
@@ -542,7 +569,7 @@ A printer backend (`backends/`) and Google Sheets sync are not written yet.
 | # | Question | Owner | Status |
 |---|----------|-------|--------|
 | 1 | Exact dongle model(s)? | | **closed:** ASIX AX88179 |
-| 2 | Label stock? | | **closed:** OnlineLabels OL25SP, 80/sheet, Letter |
+| 2 | Label stock? | | **closed:** Avery PermaTrack 60519 (1" × ½", 84/sheet, Letter); OL25SP kept as an option |
 | 3 | Printer? | | **closed:** Canon imageCLASS MF3010, USB. Pi driver support = M0 test |
 | 4 | MAC format? | | **closed:** `9C-69-D3-9C-12-65` |
 | 5 | Additional label text? | | **closed:** none |
@@ -576,3 +603,5 @@ A printer backend (`backends/`) and Google Sheets sync are not written yet.
 | 2026-09-30 | Dongles get DHCP via an NM profile with route-metric 900 (replaces "unmanaged") | Internet check needs an address; high metric keeps Pi traffic off dongles |
 | 2026-09-30 | Detectors poll (sysfs / PowerShell) behind one interface; simulator for development | Develop on any OS, same code on the Pi |
 | 2026-09-30 | Dashboard = FastAPI + SSE + plain JS; no printing yet ("Mark as printed" commits) | User request: stop at showing the document |
+| 2026-10-05 | Default stock changed to Avery PermaTrack 60519 (1" × ½", 6×14); OL25SP kept selectable | User request |
+| 2026-10-05 | MAC text wraps to two lines (`9C-69-D3` / `9C-12-65`) when one line would be < 6 pt; QR quiet zone set to exactly 4 modules on both sides | 1"-wide label cannot fit 17 characters legibly on one line |

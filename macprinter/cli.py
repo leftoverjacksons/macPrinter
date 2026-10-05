@@ -15,7 +15,7 @@ def _cell(s: str) -> tuple[int, int]:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="macprinter")
-    p.add_argument("--template", default="OL25SP", help="template id or YAML path")
+    p.add_argument("--template", default="AVERY60519", help="template id or YAML path")
     p.add_argument("--dx", type=float, default=0.0, help="calibration offset, mm (+ = right)")
     p.add_argument("--dy", type=float, default=0.0, help="calibration offset, mm (+ = down)")
     sub = p.add_subparsers(dest="cmd", required=True)

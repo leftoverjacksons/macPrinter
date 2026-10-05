@@ -60,7 +60,8 @@ def test_happy_path(client):
     assert r == {"job_id": 1, "placed": 1, "remaining": 0}
     s = client.get("/api/state").json()
     assert s["session"] is None                               # queue empty -> session done
-    assert s["sheet"]["free"] == 79
+    assert s["sheet"]["template"] == "AVERY60519"
+    assert s["sheet"]["free"] == s["sheet"]["capacity"] - 1 == 83
     assert client.get("/api/jobs/1.pdf").status_code == 200
     assert [h["mac"] for h in client.get("/api/history").json()] == ["9C-69-D3-9C-12-65"]
 
@@ -147,9 +148,11 @@ def test_skips_used_and_void_cells(client):
 
 
 def test_overflow_continues_on_new_sheet(client):
-    for r in range(20):
-        for col in range(4):
-            if (r, col) != (19, 3):
+    sh = client.get("/api/state").json()["sheet"]
+    rows, cols = sh["rows"], sh["cols"]
+    for r in range(rows):
+        for col in range(cols):
+            if (r, col) != (rows - 1, cols - 1):
                 client.post("/api/sheet/cell", json={"row": r, "col": col, "state": "used"})
     client.post("/api/session/start")
     wait_status(client, plug(client, mac="9C-69-D3-00-00-0A"))
@@ -185,3 +188,10 @@ def test_reprint_from_history(client):
     assert client.post("/api/history/9C-69-D3-00-00-0D/reprint").status_code == 200
     q = client.get("/api/state").json()["queue"]
     assert q[0]["reprint"] is True
+
+
+def test_new_sheet_with_other_template(client):
+    assert client.post("/api/sheet/new", json={"template": "OL25SP"}).status_code == 200
+    sh = client.get("/api/state").json()["sheet"]
+    assert (sh["template"], sh["capacity"]) == ("OL25SP", 80)
+    assert client.get("/api/templates").json() == ["AVERY60519", "OL25SP"]
